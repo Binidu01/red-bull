@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 
 /* ─────────────────────────────
    1. Load Google model-viewer (production CDN)
-   No Lit dev‑mode warnings
    ───────────────────────────── */
 if (typeof window !== 'undefined') {
   const scriptId = 'model-viewer-script';
@@ -18,9 +17,7 @@ if (typeof window !== 'undefined') {
 }
 
 /* ─────────────────────────────
-   2. Floating 3D Can – z‑index 9999
-   Desktop: horizontal glide based on scroll
-   Mobile: small, bottom‑right, low opacity
+   2. Floating 3D Can – now rotatable via mouse/touch
    ───────────────────────────── */
 const FloatingCan = ({
   scrollProgress,
@@ -73,19 +70,19 @@ const FloatingCan = ({
     left: `${getDesktopLeft(scrollProgress)}%`,
     transform: 'translate(-50%, -50%)',
     opacity: 1,
-    zIndex: 9999,   // 👈 always on top
+    zIndex: 9999,
   };
 
   const mobileStyle = {
-    width: '120px',
-    height: '120px',
-    bottom: '20px',
-    right: '20px',
+    width: '140px',      // slightly larger for better touch rotation
+    height: '140px',
+    bottom: '24px',
+    right: '24px',
     top: 'auto',
     left: 'auto',
     transform: 'none',
-    opacity: 0.45,
-    zIndex: 9999,   // 👈 always above everything
+    opacity: 0.6,        // a bit more visible for interaction
+    zIndex: 9999,
   };
 
   const style = isMobile ? mobileStyle : desktopStyle;
@@ -102,7 +99,12 @@ const FloatingCan = ({
         camera-controls
         disable-zoom
         disable-pan
-        style={{ width: '100%', height: '100%' }}
+        style={{
+          width: '100%',
+          height: '100%',
+          pointerEvents: 'auto',   // 👈 capture mouse/touch on the model only
+          touchAction: 'none',     // 👈 prevent page scroll while rotating
+        }}
       />
     </div>
   );
@@ -671,7 +673,7 @@ export default function RedBullPage() {
         </p>
       </footer>
 
-      {/* ── Floating 3D Can (always on top, z‑9999) ── */}
+      {/* ── Floating 3D Can (rotatable!) ── */}
       <FloatingCan scrollProgress={scrollProgress} isMobile={isMobile} />
 
       {/* ── Global Styles ── */}
