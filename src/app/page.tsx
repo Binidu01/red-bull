@@ -1,64 +1,99 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import '@google/model-viewer';
 
-/* ──────────────────────────
-   Smooth Cinematic Floating Can
-   (always vertically centered, moves horizontally only)
-   ────────────────────────── */
-const FloatingCan = ({ scrollProgress }: { scrollProgress: number }) => {
-  const modelRef = useRef<any>(null);
+/* ─────────────────────────────
+   1. Load Google model-viewer (production CDN)
+   No Lit dev‑mode warnings
+   ───────────────────────────── */
+if (typeof window !== 'undefined') {
+  const scriptId = 'model-viewer-script';
+  if (!document.getElementById(scriptId)) {
+    const script = document.createElement('script');
+    script.id = scriptId;
+    script.src = 'https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js';
+    script.type = 'module';
+    document.head.appendChild(script);
+  }
+}
+
+/* ─────────────────────────────
+   2. Floating 3D Can – z‑index 9999
+   Desktop: horizontal glide based on scroll
+   Mobile: small, bottom‑right, low opacity
+   ───────────────────────────── */
+const FloatingCan = ({
+  scrollProgress,
+  isMobile,
+}: {
+  scrollProgress: number;
+  isMobile: boolean;
+}) => {
+  const modelRef = useRef<HTMLElement & { updateComplete?: Promise<void> }>(null);
 
   useEffect(() => {
-    if (modelRef.current) {
-      modelRef.current.cameraOrbit = '0deg 75deg auto';
-    }
+    const el = modelRef.current;
+    if (!el) return;
+    el.setAttribute('camera-orbit', '0deg 75deg auto');
+    el.updateComplete?.catch(() => {});
   }, []);
 
-  // Only the horizontal (left) values change – vertical stays 50%
   const waypoints: [number, number][] = [
-    [0,     50],   // hero start – centre
-    [0.10,  80],   // hero end   – right
-    [0.18,  90],   // energy     – far right
-    [0.32,  92],   // features   – even further right
-    [0.48,  75],   // showcase   – right column centre
-    [0.62,  90],   // formula    – bottom right
-    [0.74,  92],   // editions   – further right
-    [0.84,  10],   // quote      – bottom left
-    [0.91,  90],   // cta        – final hold
+    [0, 50],
+    [0.1, 80],
+    [0.18, 90],
+    [0.32, 92],
+    [0.48, 75],
+    [0.62, 90],
+    [0.74, 92],
+    [0.84, 10],
+    [0.91, 90],
   ];
 
   const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
-  const getPosition = (progress: number) => {
-    const p = Math.max(0, Math.min(1, progress));
+  const getDesktopLeft = (p: number) => {
+    const progress = Math.max(0, Math.min(1, p));
     const last = waypoints[waypoints.length - 1];
-    if (p >= last[0]) return last[1]; // left value only
+    if (progress >= last[0]) return last[1];
     for (let i = 0; i < waypoints.length - 1; i++) {
       const [p0, x0] = waypoints[i];
       const [p1, x1] = waypoints[i + 1];
-      if (p >= p0 && p <= p1) {
-        const t = (p - p0) / (p1 - p0);
-        return lerp(x0, x1, t);
+      if (progress >= p0 && progress <= p1) {
+        return lerp(x0, x1, (progress - p0) / (p1 - p0));
       }
     }
     return last[1];
   };
 
-  const left = getPosition(scrollProgress);
+  const desktopStyle = {
+    width: 'min(70vw, 500px)',
+    height: 'min(70vw, 500px)',
+    top: '50%',
+    left: `${getDesktopLeft(scrollProgress)}%`,
+    transform: 'translate(-50%, -50%)',
+    opacity: 1,
+    zIndex: 9999,   // 👈 always on top
+  };
+
+  const mobileStyle = {
+    width: '120px',
+    height: '120px',
+    bottom: '20px',
+    right: '20px',
+    top: 'auto',
+    left: 'auto',
+    transform: 'none',
+    opacity: 0.45,
+    zIndex: 9999,   // 👈 always above everything
+  };
+
+  const style = isMobile ? mobileStyle : desktopStyle;
 
   return (
     <div
-      className="fixed z-50 pointer-events-none"
-      style={{
-        width: 'min(70vw, 500px)',
-        height: 'min(70vw, 500px)',
-        top: '50%',                   // always vertically centred
-        left: `${left}%`,
-        transform: 'translate(-50%, -50%)',
-        willChange: 'left',           // only left changes now
-      }}
+      className="fixed pointer-events-none transition-all duration-700 ease-out z-9999"
+      style={style}
     >
       <model-viewer
         ref={modelRef}
@@ -73,37 +108,48 @@ const FloatingCan = ({ scrollProgress }: { scrollProgress: number }) => {
   );
 };
 
-/* ─────────────────────────────────
-   Main Page Component
-   ───────────────────────────────── */
+/* ─────────────────────────────
+   3. Main Page Component
+   ───────────────────────────── */
 export default function RedBullPage() {
   const [scrollProgress, setScrollProgress] = useState(0);
   const [cursorHover, setCursorHover] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
   const cursorDot = useRef<HTMLDivElement>(null);
   const cursorRing = useRef<HTMLDivElement>(null);
   const mx = useRef(0);
   const my = useRef(0);
 
-  // ── Scroll & mouse tracking ──
+  // Mobile detection
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
+  // Scroll progress
   useEffect(() => {
     const onScroll = () => {
       const total = document.body.scrollHeight - window.innerHeight;
       if (total > 0) setScrollProgress(window.scrollY / total);
     };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // Mouse tracking
+  useEffect(() => {
     const onMouse = (e: MouseEvent) => {
       mx.current = e.clientX;
       my.current = e.clientY;
     };
-    window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('mousemove', onMouse);
-    return () => {
-      window.removeEventListener('scroll', onScroll);
-      window.removeEventListener('mousemove', onMouse);
-    };
+    return () => window.removeEventListener('mousemove', onMouse);
   }, []);
 
-  // ── Custom cursor (always visible via mix‑blend‑mode) ──
+  // Custom cursor animation
   useEffect(() => {
     const dot = cursorDot.current;
     const ring = cursorRing.current;
@@ -120,24 +166,24 @@ export default function RedBullPage() {
     animate();
   }, []);
 
-  // ── Hover effects ──
+  // Hover detection on hoverable elements
   useEffect(() => {
-    const addHover = () => setCursorHover(true);
-    const removeHover = () => setCursorHover(false);
+    const add = () => setCursorHover(true);
+    const remove = () => setCursorHover(false);
     const els = document.querySelectorAll('.hoverable');
     els.forEach((el) => {
-      el.addEventListener('mouseenter', addHover);
-      el.addEventListener('mouseleave', removeHover);
+      el.addEventListener('mouseenter', add);
+      el.addEventListener('mouseleave', remove);
     });
     return () => {
       els.forEach((el) => {
-        el.removeEventListener('mouseenter', addHover);
-        el.removeEventListener('mouseleave', removeHover);
+        el.removeEventListener('mouseenter', add);
+        el.removeEventListener('mouseleave', remove);
       });
     };
   }, []);
 
-  // ── Scroll reveal ──
+  // Scroll reveal
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
@@ -151,7 +197,7 @@ export default function RedBullPage() {
     return () => observer.disconnect();
   }, []);
 
-  // ── Marquee HTML ──
+  // Marquee HTML
   const marqueeHtml = (() => {
     const words = [
       'RED BULL',
@@ -168,7 +214,10 @@ export default function RedBullPage() {
     let str = '';
     for (let i = 0; i < 6; i++) {
       words.forEach((w) => {
-        str += w === '·' ? '<span class="sep">·</span>' : `<span>${w}</span>`;
+        str +=
+          w === '·'
+            ? '<span class="sep">·</span>'
+            : `<span>${w}</span>`;
       });
     }
     return str + str;
@@ -176,76 +225,78 @@ export default function RedBullPage() {
 
   return (
     <>
-      {/* ── Cursor ── */}
+      {/* ── Custom cursor (hidden on touch devices) ── */}
       <div
         ref={cursorDot}
-        className="fixed top-0 left-0 pointer-events-none z-9999 rounded-full mix-blend-difference transition-all duration-200"
+        className="cursor-hide-touch fixed top-0 left-0 pointer-events-none rounded-full mix-blend-difference transition-all duration-200"
         style={{
           width: cursorHover ? '18px' : '8px',
           height: cursorHover ? '18px' : '8px',
           background: '#fff',
           transform: 'translate(-50%, -50%)',
+          zIndex: 99999,
         }}
       />
       <div
         ref={cursorRing}
-        className="fixed top-0 left-0 pointer-events-none z-9999 rounded-full border mix-blend-difference transition-all duration-100"
+        className="cursor-hide-touch fixed top-0 left-0 pointer-events-none rounded-full border mix-blend-difference transition-all duration-100"
         style={{
           width: cursorHover ? '50px' : '32px',
           height: cursorHover ? '50px' : '32px',
           borderColor: 'rgba(255,255,255,0.35)',
           transform: 'translate(-50%, -50%)',
+          zIndex: 99999,
         }}
       />
 
       {/* ── Hero ── */}
       <section
         id="hero"
-        className="relative h-screen min-h-175 flex items-center overflow-hidden bg-[#06060a]"
+        className="relative h-screen flex items-center overflow-hidden bg-[#06060a]"
       >
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_70%_at_70%_50%,rgba(232,23,28,.06)_0%,transparent_65%)]" />
-        <div className="relative z-20 px-[8vw] max-w-[54%] pointer-events-none">
-          <p className="text-xs tracking-[.35em] uppercase text-[#e8171c] mb-7 opacity-0 animate-[fuv_.8s_.2s_forwards] font-[Barlow_Condensed]">
+        <div className="relative z-20 px-6 md:px-[8vw] max-w-full md:max-w-[54%]">
+          <p className="text-xs tracking-[.35em] uppercase text-[#e8171c] mb-6 opacity-0 animate-[fadeUp_0.8s_0.2s_forwards] font-[Barlow_Condensed]">
             Est. 1987 · Fuschl am See, Austria
           </p>
-          <h1 className="text-[clamp(5rem,11vw,10rem)] leading-[.9] tracking-[.02em] text-[#f2eeea] opacity-0 animate-[fuv_.8s_.45s_forwards] font-[Bebas_Neue]">
+          <h1 className="text-[clamp(3rem,12vw,10rem)] md:text-[clamp(5rem,11vw,10rem)] leading-[.9] tracking-[.02em] text-[#f2eeea] opacity-0 animate-[fadeUp_0.8s_0.45s_forwards] font-[Bebas_Neue]">
             GIVES
             <br />
             YOU
             <br />
             <em className="text-[#e8171c] not-italic">WINGS.</em>
           </h1>
-          <p className="text-base leading-7 text-white/40 mt-9 max-w-92.5 font-light opacity-0 animate-[fuv_.8s_.7s_forwards] font-[Barlow]">
+          <p className="text-base leading-7 text-white/40 mt-8 max-w-[92.5%] font-light opacity-0 animate-[fadeUp_0.8s_0.7s_forwards] font-[Barlow]">
             One can. Four decades of energy science. The formula trusted by over
             12 billion people across 175 countries — every single year.
           </p>
-          <div className="flex gap-4 mt-12 pointer-events-auto opacity-0 animate-[fuv_.8s_.95s_forwards]">
+          <div className="flex flex-col sm:flex-row gap-4 mt-12 opacity-0 animate-[fadeUp_0.8s_0.95s_forwards]">
             <a
               href="#formula"
-              className="text-sm tracking-[.2em] uppercase text-[#06060a] bg-[#e8171c] py-4 px-9 rounded-sm hover:bg-[#b01015] hover:-translate-y-0.5 transition-all font-[Barlow_Condensed] hoverable"
+              className="text-sm tracking-[.2em] uppercase text-[#06060a] bg-[#e8171c] py-4 px-9 rounded-sm hover:bg-[#b01015] hover:-translate-y-0.5 transition-all font-[Barlow_Condensed] hoverable text-center"
             >
               Explore Formula
             </a>
             <a
               href="#showcase"
-              className="text-sm tracking-[.2em] uppercase text-[#f2eeea] border border-white/20 py-4 px-9 rounded-sm hover:border-white/40 transition-colors font-[Barlow_Condensed] hoverable"
+              className="text-sm tracking-[.2em] uppercase text-[#f2eeea] border border-white/20 py-4 px-9 rounded-sm hover:border-white/40 transition-colors font-[Barlow_Condensed] hoverable text-center"
             >
               View the Can →
             </a>
           </div>
         </div>
-        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-2 opacity-0 animate-[fuv_.8s_1.3s_forwards]">
+        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-2 opacity-0 animate-[fadeUp_0.8s_1.3s_forwards]">
           <span className="text-xs tracking-[.3em] uppercase text-white/25 font-[Barlow_Condensed]">
             Scroll
           </span>
-          <div className="w-px h-12 bg-linear-to-b from-[#e8171c]/40 to-transparent animate-[spulse_2s_ease-in-out_infinite]" />
+          <div className="w-px h-12 bg-linear-to-b from-[#e8171c]/40 to-transparent animate-[pulse_2s_ease-in-out_infinite]" />
         </div>
       </section>
 
       {/* ── Marquee ── */}
       <div className="bg-[#e8171c] py-3 overflow-hidden whitespace-nowrap select-none">
         <div
-          className="inline-flex animate-[mq_22s_linear_infinite] [&>span]:text-base [&>span]:tracking-[.18em] [&>span]:text-white [&>span]:px-9 [&>.sep]:text-white/40 font-[Bebas_Neue]"
+          className="inline-flex animate-[marquee_22s_linear_infinite] [&>span]:text-sm md:[&>span]:text-base [&>span]:tracking-[.18em] [&>span]:text-white [&>span]:px-4 md:[&>span]:px-9 [&>.sep]:text-white/40 font-[Bebas_Neue]"
           dangerouslySetInnerHTML={{ __html: marqueeHtml }}
         />
       </div>
@@ -253,9 +304,9 @@ export default function RedBullPage() {
       {/* ── Stats ── */}
       <section
         id="energy"
-        className="py-36 bg-[#0e0e14] border-y border-white/5"
+        className="py-20 md:py-36 bg-[#0e0e14] border-y border-white/5"
       >
-        <div className="max-w-7xl mx-auto px-[6vw] grid grid-cols-4">
+        <div className="max-w-7xl mx-auto px-6 md:px-[6vw] grid grid-cols-2 md:grid-cols-4">
           {[
             { value: '12B+', label: 'Cans sold annually' },
             { value: '175+', label: 'Countries worldwide' },
@@ -264,9 +315,9 @@ export default function RedBullPage() {
           ].map((stat, i) => (
             <div
               key={i}
-              className="rv p-16 border-r border-white/5 last:border-r-0 relative overflow-hidden group hoverable after:content-[''] after:absolute after:bottom-0 after:left-0 after:w-0 after:h-0.5 after:bg-[#e8171c] after:transition-all after:duration-500 hover:after:w-full"
+              className="rv p-6 md:p-16 border-r border-b md:border-b-0 border-white/5 odd:border-r md:border-r last:border-r-0 relative overflow-hidden group hoverable after:content-[''] after:absolute after:bottom-0 after:left-0 after:h-0.5 after:bg-[#e8171c] after:w-0 hover:after:w-full after:transition-all after:duration-500"
             >
-              <span className="text-[5.5rem] leading-none text-[#f2eeea] font-[Bebas_Neue]">
+              <span className="text-[3.5rem] sm:text-[4.5rem] md:text-[5.5rem] leading-none text-[#f2eeea] font-[Bebas_Neue] block">
                 {stat.value}
               </span>
               <span className="text-xs tracking-[.2em] uppercase text-white/30 mt-1 block font-[Barlow_Condensed]">
@@ -278,17 +329,17 @@ export default function RedBullPage() {
       </section>
 
       {/* ── Features ── */}
-      <section id="features" className="py-36">
-        <div className="max-w-7xl mx-auto px-[6vw]">
+      <section id="features" className="py-20 md:py-36">
+        <div className="max-w-7xl mx-auto px-6 md:px-[6vw]">
           <span className="text-xs tracking-[.38em] uppercase text-[#e8171c] mb-4 block font-[Barlow_Condensed] rv">
             Why Red Bull
           </span>
-          <h2 className="text-[clamp(3rem,6vw,5.5rem)] leading-[.98] text-[#f2eeea] rv mb-16 font-[Bebas_Neue]">
+          <h2 className="text-[clamp(2.5rem,8vw,5.5rem)] leading-[.98] text-[#f2eeea] rv mb-16 font-[Bebas_Neue]">
             ENGINEERED FOR
             <br />
             <em className="text-[#e8171c] not-italic">PERFORMANCE</em>
           </h2>
-          <div className="grid grid-cols-2 gap-px bg-white/5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-white/5">
             {[
               {
                 num: '01',
@@ -317,9 +368,9 @@ export default function RedBullPage() {
             ].map((f, i) => (
               <div
                 key={i}
-                className="rv bg-[#06060a] p-12 relative overflow-hidden group hover:bg-[#0e0e14] transition-colors hoverable"
+                className="rv bg-[#06060a] p-8 md:p-12 relative overflow-hidden group hover:bg-[#0e0e14] transition-colors hoverable"
               >
-                <div className="text-[7rem] leading-none text-[#e8171c]/10 absolute top-4 right-8 pointer-events-none group-hover:text-[#e8171c]/15 transition-colors font-[Bebas_Neue]">
+                <div className="text-[5rem] md:text-[7rem] leading-none text-[#e8171c]/10 absolute top-4 right-8 pointer-events-none group-hover:text-[#e8171c]/15 transition-colors font-[Bebas_Neue]">
                   {f.num}
                 </div>
                 <svg
@@ -335,7 +386,7 @@ export default function RedBullPage() {
                     strokeLinejoin="round"
                   />
                 </svg>
-                <h3 className="text-4xl tracking-[.03em] text-[#f2eeea] mb-4 leading-tight font-[Bebas_Neue]">
+                <h3 className="text-3xl md:text-4xl tracking-[.03em] text-[#f2eeea] mb-4 leading-tight font-[Bebas_Neue]">
                   {f.head}
                 </h3>
                 <p className="text-sm leading-7 text-white/40 max-w-xs font-light font-[Barlow]">
@@ -350,14 +401,14 @@ export default function RedBullPage() {
       {/* ── Showcase (The Can) ── */}
       <section
         id="showcase"
-        className="py-32 bg-[#0e0e14] relative z-10"
+        className="py-20 md:py-32 bg-[#0e0e14] relative z-10"
       >
-        <div className="max-w-7xl mx-auto px-[6vw] grid grid-cols-2 gap-24 items-center">
+        <div className="max-w-7xl mx-auto px-6 md:px-[6vw] grid grid-cols-1 md:grid-cols-2 gap-12 md:gap-24 items-center">
           <div>
             <span className="text-xs tracking-[.38em] uppercase text-[#e8171c] mb-4 block font-[Barlow_Condensed] rv">
               The Can
             </span>
-            <h2 className="text-[clamp(3rem,6vw,5.5rem)] leading-[.98] text-[#f2eeea] mb-8 font-[Bebas_Neue] rv">
+            <h2 className="text-[clamp(2.5rem,8vw,5.5rem)] leading-[.98] text-[#f2eeea] mb-8 font-[Bebas_Neue] rv">
               250ml OF
               <br />
               <em className="text-[#e8171c] not-italic">PURE ENERGY</em>
@@ -392,30 +443,31 @@ export default function RedBullPage() {
               ))}
             </ul>
           </div>
-          <div className="w-full aspect-square" />
+          {/* Placeholder – hidden on mobile because can is elsewhere */}
+          <div className="hidden md:block w-full aspect-square" />
         </div>
       </section>
 
-      {/* ── Ingredients ── */}
+      {/* ── Ingredients (Formula) ── */}
       <section
         id="formula"
-        className="py-32 bg-[#f2eeea] text-[#06060a] relative overflow-hidden"
+        className="py-20 md:py-32 bg-[#f2eeea] text-[#06060a] relative overflow-hidden"
       >
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none">
           <span className="text-[19vw] text-black/5 whitespace-nowrap font-[Bebas_Neue]">
             FORMULA
           </span>
         </div>
-        <div className="max-w-7xl mx-auto px-[6vw] relative z-10">
+        <div className="max-w-7xl mx-auto px-6 md:px-[6vw] relative z-10">
           <span className="text-xs tracking-[.38em] uppercase text-[#e8171c] mb-4 block font-[Barlow_Condensed] rv">
             The Formula
           </span>
-          <h2 className="text-[clamp(3rem,6vw,5.5rem)] leading-[.98] text-[#06060a] mb-12 font-[Bebas_Neue] rv">
+          <h2 className="text-[clamp(2.5rem,8vw,5.5rem)] leading-[.98] text-[#06060a] mb-12 font-[Bebas_Neue] rv">
             EVERY INGREDIENT
             <br />
             <em className="text-[#e8171c] not-italic">HAS A PURPOSE</em>
           </h2>
-          <div className="grid grid-cols-3 gap-px bg-black/10">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-px bg-black/10">
             {[
               {
                 name: 'Caffeine',
@@ -465,7 +517,7 @@ export default function RedBullPage() {
             ].map((ig, i) => (
               <div
                 key={i}
-                className="rv bg-[#f2eeea] p-8 relative overflow-hidden group hover:bg-[#e8e4dd] transition-colors hoverable before:content-[''] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:bg-[#e8171c] before:scale-y-0 before:transition-transform before:duration-300 before:ease before:origin-bottom hover:before:scale-y-100"
+                className="rv bg-[#f2eeea] p-6 md:p-8 relative overflow-hidden group hover:bg-[#e8e4dd] transition-colors hoverable before:content-[''] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:bg-[#e8171c] before:scale-y-0 before:transition-transform before:duration-300 before:ease before:origin-bottom hover:before:scale-y-100"
               >
                 <span className="text-lg font-bold tracking-[.07em] uppercase text-[#06060a] block mb-1 font-[Barlow_Condensed]">
                   {ig.name}
@@ -483,15 +535,15 @@ export default function RedBullPage() {
       </section>
 
       {/* ── Editions ── */}
-      <section id="editions" className="py-36">
-        <div className="max-w-7xl mx-auto px-[6vw]">
+      <section id="editions" className="py-20 md:py-36">
+        <div className="max-w-7xl mx-auto px-6 md:px-[6vw]">
           <span className="text-xs tracking-[.38em] uppercase text-[#e8171c] mb-4 block font-[Barlow_Condensed] rv">
             Product Range
           </span>
-          <h2 className="text-[clamp(3rem,6vw,5.5rem)] leading-[.98] text-[#f2eeea] mb-16 font-[Bebas_Neue] rv">
+          <h2 className="text-[clamp(2.5rem,8vw,5.5rem)] leading-[.98] text-[#f2eeea] mb-16 font-[Bebas_Neue] rv">
             THE <em className="text-[#e8171c] not-italic">EDITIONS</em>
           </h2>
-          <div className="grid grid-cols-3 gap-px bg-white/5">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-px bg-white/5">
             {[
               {
                 bar: '#e8171c',
@@ -532,7 +584,7 @@ export default function RedBullPage() {
             ].map((ed, i) => (
               <div
                 key={i}
-                className="rv bg-[#06060a] p-10 relative overflow-hidden group hover:bg-[#0e0e14] transition-colors hoverable"
+                className="rv bg-[#06060a] p-8 md:p-10 relative overflow-hidden group hover:bg-[#0e0e14] transition-colors hoverable"
               >
                 <div
                   className="absolute top-0 left-0 right-0 h-1 origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-400"
@@ -554,10 +606,13 @@ export default function RedBullPage() {
       </section>
 
       {/* ── Quote ── */}
-      <section id="quote" className="py-40 text-center relative overflow-hidden">
+      <section
+        id="quote"
+        className="py-24 md:py-40 text-center relative overflow-hidden"
+      >
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_55%_60%_at_50%_50%,rgba(232,23,28,.06)_0%,transparent_70%)] pointer-events-none" />
-        <div className="max-w-225 mx-auto px-[6vw] relative z-10">
-          <blockquote className="text-[clamp(3rem,7vw,6.5rem)] leading-[1.05] font-[Bebas_Neue] rv">
+        <div className="max-w-225 mx-auto px-6 md:px-[6vw] relative z-10">
+          <blockquote className="text-[clamp(2.2rem,8vw,6.5rem)] leading-[1.05] font-[Bebas_Neue] rv">
             &quot;IT'S NOT JUST AN ENERGY DRINK — IT'S A{' '}
             <em className="text-[#e8171c] not-italic">MINDSET.</em>&quot;
           </blockquote>
@@ -568,13 +623,13 @@ export default function RedBullPage() {
       </section>
 
       {/* ── Final CTA ── */}
-      <section id="cta" className="py-40 text-center bg-[#0e0e14]">
-        <div className="max-w-7xl mx-auto px-[6vw]">
-          <h2 className="text-[clamp(4rem,9vw,8.5rem)] text-[#f2eeea]  leading-[.95] mb-12 font-[Bebas_Neue] rv">
+      <section id="cta" className="py-24 md:py-40 text-center bg-[#0e0e14]">
+        <div className="max-w-7xl mx-auto px-6 md:px-[6vw]">
+          <h2 className="text-[clamp(3rem,10vw,8.5rem)] text-[#f2eeea] leading-[.95] mb-12 font-[Bebas_Neue] rv">
             READY TO
             <em className="text-[#e8171c] not-italic block">FLY?</em>
           </h2>
-          <div className="rv flex gap-4 justify-center">
+          <div className="rv flex flex-col sm:flex-row gap-4 justify-center">
             <a
               href="#"
               className="text-sm tracking-[.2em] uppercase text-[#06060a] bg-[#e8171c] py-4 px-9 rounded-sm hover:bg-[#b01015] transition-colors font-[Barlow_Condensed] hoverable"
@@ -591,15 +646,12 @@ export default function RedBullPage() {
         </div>
       </section>
 
-            {/* ── Footer (NO can) ── */}
-      <footer
-        id="footer"
-        className="border-t border-white/5 py-14 px-[6vw] grid grid-cols-[auto_1fr_auto] items-center gap-8 bg-[#06060a] relative z-60"
-      >
+      {/* ── Footer ── */}
+      <footer className="border-t border-white/5 py-10 md:py-14 px-6 md:px-[6vw] flex flex-col md:grid md:grid-cols-[auto_1fr_auto] items-center gap-6 md:gap-8 bg-[#06060a] relative z-60">
         <div className="text-2xl tracking-[.08em] text-[#f2eeea] font-[Bebas_Neue]">
           RED<span className="text-[#e8171c]">BULL</span>
         </div>
-        <nav className="flex gap-8 justify-center">
+        <nav className="flex flex-wrap gap-6 justify-center">
           {['Energy Drinks', 'Athletes', 'Events', 'Media', 'Careers'].map(
             (l) => (
               <a
@@ -612,26 +664,53 @@ export default function RedBullPage() {
             )
           )}
         </nav>
-        <p className="text-xs text-white/20 tracking-[.08em] text-right font-[Barlow]">
+        <p className="text-xs text-white/20 tracking-[.08em] text-center md:text-right font-[Barlow]">
           © 2024 Red Bull GmbH.
           <br />
           All rights reserved.
         </p>
       </footer>
 
+      {/* ── Floating 3D Can (always on top, z‑9999) ── */}
+      <FloatingCan scrollProgress={scrollProgress} isMobile={isMobile} />
 
-      {/* ── Floating 3D Can (always vertically centered) ── */}
-      <FloatingCan scrollProgress={scrollProgress} />
-
-      {/* ── Essential styles ── */}
+      {/* ── Global Styles ── */}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:ital,wght@0,300;0,400;0,600;0,700;1,300&family=Barlow:ital,wght@0,300;0,400;1,300&display=swap');
-        body { cursor: none; }
-        @keyframes fuv { from { opacity: 0; transform: translateY(28px); } to { opacity: 1; transform: none; } }
-        @keyframes mq { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-        @keyframes spulse { 0%,100% { opacity: 1; } 50% { opacity: 0.2; } }
-        .rv { opacity: 0; transform: translateY(36px); transition: opacity 0.85s ease, transform 0.85s ease; }
-        .rv.in { opacity: 1; transform: none; }
+
+        /* Hide custom cursor on touch devices */
+        @media (pointer: coarse) {
+          .cursor-hide-touch {
+            display: none !important;
+          }
+          body {
+            cursor: auto;
+          }
+        }
+
+        body {
+          cursor: none;
+        }
+
+        @keyframes fadeUp {
+          from { opacity: 0; transform: translateY(28px); }
+          to { opacity: 1; transform: none; }
+        }
+
+        @keyframes marquee {
+          from { transform: translateX(0); }
+          to { transform: translateX(-50%); }
+        }
+
+        .rv {
+          opacity: 0;
+          transform: translateY(36px);
+          transition: opacity 0.85s ease, transform 0.85s ease;
+        }
+        .rv.in {
+          opacity: 1;
+          transform: none;
+        }
       `}</style>
     </>
   );
